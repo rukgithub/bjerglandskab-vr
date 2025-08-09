@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<!--
+  A-Frame VR scene set in a procedurally‑generated mountain landscape.
+
+  This file uses the aframe‑environment‑component to create a realistic
+  mountainous environment without needing to download any textures or
+  3D models. The component procedurally generates hills, mountains
+  and sky with atmospheric lighting and optional dressing objects such
+  as trees or rocks.  According to the project documentation, the
+  environment component aims to provide a complete, visually interesting
+  backdrop by including all assets inside one JavaScript file and
+  generating geometry on the fly【534157400247119†L376-L381】.  Parameters
+  such as the type of ground, maximum mountain height, fog and dressing
+  amount can be tuned to achieve different looks【534157400247119†L343-L361】.
+
+  To run this file locally or on a hosted site, simply open it in a
+  browser that supports WebXR (e.g. the Meta Quest Browser). On
+  desktop you can navigate using the mouse or by dragging the view; in
+  VR you can move using the thumbstick on the left controller. See
+  README section at the bottom for further details.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Realistic Mountain VR Landscape</title>
+    <meta name="description" content="Explore a procedural mountain landscape in VR" />
+    <!-- A‑Frame core library -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <!-- Optional extras: highlight interaction and UI panel -->
+    <!-- Environment component for procedural mountains -->
+    <script src="https://cdn.jsdelivr.net/gh/feiss/aframe-environment-component@1.3.1/dist/aframe-environment-component.min.js"></script>
+    <style>
+      /* Simple CSS reset to ensure the canvas fills the page */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- The VR scene -->
+    <a-scene
+      vr-mode-ui="enterVRButton: #vrButton"
+      renderer="antialias: true"
+      background="color: #000"
+    >
+      <!-- Player rig with camera and controllers -->
+      <a-entity id="rig" position="0 1.6 0" thumbstick-move>
+        <a-camera
+          id="camera"
+          wasd-controls-enabled="false"
+          look-controls="pointerLockEnabled: false"
+        ></a-camera>
+        <!-- Left hand: includes Oculus Touch profile to ensure axis events fire -->
+        <a-entity
+          id="leftHand"
+          laser-controls="hand: left"
+          oculus-touch-controls="hand: left"
+          raycaster="objects: .clickable"
+        ></a-entity>
+        <!-- Right hand: includes teleport beams (via super-hands) optional in future -->
+        <a-entity
+          id="rightHand"
+          laser-controls="hand: right"
+          oculus-touch-controls="hand: right"
+          raycaster="objects: .clickable"
+        ></a-entity>
+      </a-entity>
+
+      <!-- Procedural mountain environment.  Adjust preset and parameters to taste.
+           See the README for parameter descriptions【534157400247119†L343-L361】.
+        -->
+      <a-entity
+        environment="
+          preset: mountains;
+          skyType: atmospheric;
+          horizonColor: #dee7ff;
+          ground: hills;
+          groundYScale: 8;
+          groundColor: #553e35;
+          groundColor2: #694439;
+          dressing: trees;
+          dressingAmount: 150;
+          dressingScale: 20;
+          fog: 0.3;
+          playArea: 5;
+        "
+      ></a-entity>
+
+      <!-- Floating text to welcome users -->
+      <a-entity
+        position="0 3 -5"
+        text="
+          value: Velkommen til bjerglandskab!\nBrug venstre tommepind til at gå rundt.\nForlad området for at opdage mere.;
+          align: center;
+          width: 6;
+          color: #fff;
+        "
+      ></a-entity>
+
+      <!-- Simple campfire model using primitives; adds ambiance -->
+      <a-entity id="campfire" position="2 0 -3">
+        <a-cylinder
+          radius="0.6"
+          height="0.2"
+          color="#3e2c1f"
+        ></a-cylinder>
+        <a-cone
+          position="0 0.3 0"
+          radius-bottom="0.4"
+          radius-top="0.0"
+          height="0.6"
+          color="#ff7e00"
+          animation="property: scale; dir: alternate; dur: 2000; easing: easeInOutSine; loop: true; to: 1 1.3 1"
+        ></a-cone>
+      </a-entity>
+
+      <!-- Light sources: ambient and point light for campfire -->
+      <a-entity light="type: ambient; intensity: 0.4; color: #FFFFFF"></a-entity>
+      <a-entity
+        light="type: point; color: #ffb367; intensity: 1.2; distance: 15"
+        position="2 1 -3"
+        animation="property: light.intensity; dir: alternate; dur: 1500; easing: easeInOutSine; loop: true; to: 1.5"
+      ></a-entity>
+
+      <!-- Minimal UI panel showing instructions in VR (optional) -->
+      <a-entity
+        id="infoPanel"
+        position="0.5 1.3 -0.7"
+        rotation="0 -20 0"
+        geometry="primitive: plane; height: 0.4; width: 1.0"
+        material="color: #222; opacity: 0.5"
+      >
+        <a-text
+          value="Brug venstre tommepind til at gå.\nHold headset-pilen på objekter for info."
+          align="center"
+          width="0.9"
+          color="#fff"
+        ></a-text>
+      </a-entity>
+    </a-scene>
+
+    <!-- Enter VR button outside of the scene for Meta Quest browsers.  Some
+         browsers hide the default button; this ensures it remains visible. -->
+    <button id="vrButton" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; padding: 12px 20px; font-size: 16px;">Enter VR</button>
+
+    <script>
+      // Custom component to support smooth movement with left thumbstick
+      AFRAME.registerComponent('thumbstick-move', {
+        schema: { speed: { default: 2.0 }, deadzone: { default: 0.12 } },
+        init: function () {
+          this._vx = 0;
+          this._vy = 0;
+          const updateAxes = (e) => {
+            const a = e.detail && (e.detail.axis || [e.detail.x, e.detail.y]);
+            if (!a || a.length < 2) return;
+            const [x, y] = a;
+            const dz = this.data.deadzone;
+            this._vx = Math.abs(x) > dz ? x : 0;
+            this._vy = Math.abs(y) > dz ? y : 0;
+          };
+          const bindTo = (sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return;
+            el.addEventListener('axismove', updateAxes);
+            el.addEventListener('thumbstickmoved', updateAxes);
+          };
+          this.el.sceneEl.addEventListener('loaded', () => {
+            bindTo('#leftHand');
+            bindTo('#rightHand');
+          });
+        },
+        tick: function (t, dt) {
+          if (!dt) return;
+          // Fallback: poll gamepads if events are not firing
+          if (!this._vx && !this._vy && navigator.getGamepads) {
+            const pads = navigator.getGamepads();
+            for (let i = 0; i < pads.length; i++) {
+              const gp = pads[i];
+              if (!gp || !gp.axes) continue;
+              const pairs = [ [2, 3], [0, 1] ];
+              for (const [ix, iy] of pairs) {
+                const x = gp.axes[ix] || 0;
+                const y = gp.axes[iy] || 0;
+                if (Math.hypot(x, y) > this.data.deadzone) {
+                  this._vx = x;
+                  this._vy = y;
+                  break;
+                }
+              }
+            }
+          }
+          if (!this._vx && !this._vy) return;
+          const cam = document.getElementById('camera');
+          if (!cam) return;
+          const dts = dt / 1000;
+          const speed = this.data.speed * dts;
+          // Move relative to camera yaw (forward is -Z)
+          const yaw = cam.object3D.rotation.y;
+          const cos = Math.cos(yaw);
+          const sin = Math.sin(yaw);
+          const localX = this._vx;
+          const localZ = -this._vy;
+          const dx = localX * cos - localZ * sin;
+          const dz = localX * sin + localZ * cos;
+          const p = this.el.object3D.position;
+          p.x += dx * speed;
+          p.z += dz * speed;
+          if (Math.abs(this._vx) < 0.05) this._vx = 0;
+          if (Math.abs(this._vy) < 0.05) this._vy = 0;
+        }
+      });
+
+      // Ensure VR button triggers entering VR in browsers that do not
+      // automatically show the built‑in button (e.g. Meta Quest).
+      document.getElementById('vrButton').addEventListener('click', () => {
+        const sceneEl = document.querySelector('a-scene');
+        if (sceneEl && sceneEl.enterVR) {
+          sceneEl.enterVR();
+        }
+      });
+    </script>
+
+    <!-- README / instructions for users (non-JS).  Hidden by default but can be
+         inspected when viewing source.  Provides guidance on hosting and
+         pushing to GitHub. -->
+    <!--
+    README
+    ======
+
+    Running locally
+    ---------------
+    1. Save this file as `mountain_vr.html` in your project directory.
+    2. To view on your Meta Quest headset:
+       - Host the file on a publicly accessible HTTPS URL.  You can
+         drag and drop it onto a static hosting service (e.g. Netlify Drop or
+         GitHub Pages) as described below.
+       - Open the URL in the Quest Browser and tap the “Enter VR” button.
+         Use the left thumbstick to walk around the mountains.
+
+    Committing and pushing to GitHub
+    --------------------------------
+    To track this file in git and publish it to a repository:
+
+    ```bash
+    # initialise a new git repository (skip if .git already exists)
+    git init
+    # add this file and any others you want to track
+    git add mountain_vr.html
+    # commit your changes
+    git commit -m "Add procedural mountain VR scene"
+    # add your GitHub repo as a remote (replace with your repo URL)
+    git remote add origin https://github.com/USERNAME/REPOSITORY.git
+    # push the commit to the main branch.  The -u flag sets upstream so
+    # subsequent pushes can use `git push` without specifying the remote.
+    git push -u origin main
+    ```
+    If you are prompted for credentials, follow the instructions to
+    authenticate via Personal Access Token or SSH key.  Once pushed, the
+    file will be available in your GitHub repository and can be served via
+    GitHub Pages if desired.
+
+    Hosting via GitHub Pages
+    ------------------------
+    After pushing to GitHub, you can enable GitHub Pages by going to the
+    repository’s Settings → Pages and selecting the source branch (e.g. `main`)
+    with the root folder `/`.  GitHub will provide you with a URL like
+    `https://USERNAME.github.io/REPOSITORY/mountain_vr.html`.  Open this
+    address on your Meta Quest headset to enjoy the VR landscape.
+    -->
+  </body>
+</html>
