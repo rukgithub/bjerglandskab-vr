@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<!--
+  A‑Frame VR darts game.  This scene lets you play a professional-style game of
+  darts in virtual reality using your VR controllers.  You can throw darts
+  using the trigger on your right-hand controller, and your score will be
+  deducted automatically from a starting total of 501 points.  The dartboard
+  supports singles, doubles, triples and bullseyes, and scores are computed
+  based on the radial distance and angle of each hit.  See the script
+  components at the bottom of this file for details on how throwing,
+  collision and scoring are implemented.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Pro Darts VR</title>
+    <meta
+      name="description"
+      content="Play a professional darts game in VR"
+    />
+    <!-- A‑Frame core library -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <style>
+      /* Ensure the canvas fills the viewport */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #111;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- VR scene definition -->
+    <a-scene
+      vr-mode-ui="enterVRButton: #vrButton"
+      renderer="antialias: true"
+      background="color: #111"
+    >
+      <!-- Player rig with camera and controllers.  The left thumbstick is
+           configured for smooth locomotion via the thumbstick‑move component.
+           The right hand is configured with the dart‑thrower component so
+           pressing the trigger spawns a dart and throws it towards the
+           board. -->
+      <a-entity id="rig" position="0 1.6 2" thumbstick-move>
+        <a-camera id="camera" wasd-controls-enabled="false"></a-camera>
+        <a-entity
+          id="leftHand"
+          laser-controls="hand: left"
+          oculus-touch-controls="hand: left"
+        ></a-entity>
+        <a-entity
+          id="rightHand"
+          laser-controls="hand: right"
+          oculus-touch-controls="hand: right"
+          dart-thrower
+        ></a-entity>
+      </a-entity>
+
+      <!-- Ground plane provides a simple floor.  Using a wide plane avoids
+           falling off the play area. -->
+      <a-plane
+        rotation="-90 0 0"
+        width="20"
+        height="20"
+        color="#444"
+      ></a-plane>
+
+      <!-- Dartboard.  Represented as a thin cylinder oriented vertically.
+           A sphere is mounted at the centre for the bullseye visual.  See
+           dart component for how scoring is computed based on radial
+           distance and angle relative to this board. -->
+      <a-entity id="board" position="0 1.6 -5" rotation="0 0 0">
+        <a-cylinder
+          id="boardSurface"
+          radius="0.5"
+          height="0.02"
+          color="#333"
+          side="double"
+        ></a-cylinder>
+        <!-- Optional visual for bullseye: two concentric spheres -->
+        <a-sphere
+          radius="0.04"
+          color="#f00"
+          position="0 0 0.02"
+        ></a-sphere>
+        <a-sphere
+          radius="0.08"
+          color="#0f0"
+          position="0 0 0.015"
+        ></a-sphere>
+      </a-entity>
+
+      <!-- Scoreboard displays the current score.  It uses the scoreboard
+           component defined below to manage the numeric state and update
+           its text dynamically. -->
+      <a-text
+        id="scoreboard"
+        value="Score: 501"
+        position="-0.8 3 -4.5"
+        width="3"
+        color="#ffffff"
+      ></a-text>
+
+      <!-- Lighting to illuminate the play area and board -->
+      <a-entity light="type: ambient; intensity: 0.5"></a-entity>
+      <a-entity
+        light="type: directional; intensity: 0.8; castShadow: false"
+        position="1 4 1"
+      ></a-entity>
+    </a-scene>
+
+    <!-- External VR button for browsers that hide the built‑in button (e.g.
+         Meta Quest).  When clicked, it calls scene.enterVR() to enter
+         immersive mode. -->
+    <button
+      id="vrButton"
+      style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; padding: 12px 20px; font-size: 16px;"
+    >
+      Enter VR
+    </button>
+
+    <script>
+      // Smooth locomotion component.  This is the same thumbstick-move
+      // implementation used in the original mountain scene and supports
+      // movement relative to the camera's heading.  See README for usage.
+      AFRAME.registerComponent('thumbstick-move', {
+        schema: { speed: { default: 2.0 }, deadzone: { default: 0.12 } },
+        init: function () {
+          this._vx = 0;
+          this._vy = 0;
+          const updateAxes = (e) => {
+            const a = e.detail && (e.detail.axis || [e.detail.x, e.detail.y]);
+            if (!a || a.length < 2) return;
+            const [x, y] = a;
+            const dz = this.data.deadzone;
+            this._vx = Math.abs(x) > dz ? x : 0;
+            this._vy = Math.abs(y) > dz ? y : 0;
+          };
+          const bindTo = (sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return;
+            el.addEventListener('axismove', updateAxes);
+            el.addEventListener('thumbstickmoved', updateAxes);
+          };
+          this.el.sceneEl.addEventListener('loaded', () => {
+            bindTo('#leftHand');
+            bindTo('#rightHand');
+          });
+        },
+        tick: function (t, dt) {
+          if (!dt) return;
+          // Poll gamepads if necessary
+          if (!this._vx && !this._vy && navigator.getGamepads) {
+            const pads = navigator.getGamepads();
+            for (let i = 0; i < pads.length; i++) {
+              const gp = pads[i];
+              if (!gp || !gp.axes) continue;
+              const pairs = [ [2, 3], [0, 1] ];
+              for (const [ix, iy] of pairs) {
+                const x = gp.axes[ix] || 0;
+                const y = gp.axes[iy] || 0;
+                if (Math.hypot(x, y) > this.data.deadzone) {
+                  this._vx = x;
+                  this._vy = y;
+                  break;
+                }
+              }
+            }
+          }
+          if (!this._vx && !this._vy) return;
+          const cam = document.getElementById('camera');
+          if (!cam) return;
+          const dts = dt / 1000;
+          const speed = this.data.speed * dts;
+          const yaw = cam.object3D.rotation.y;
+          const cos = Math.cos(yaw);
+          const sin = Math.sin(yaw);
+          const localX = this._vx;
+          const localZ = -this._vy;
+          const dx = localX * cos - localZ * sin;
+          const dz = localX * sin + localZ * cos;
+          const p = this.el.object3D.position;
+          p.x += dx * speed;
+          p.z += dz * speed;
+          if (Math.abs(this._vx) < 0.05) this._vx = 0;
+          if (Math.abs(this._vy) < 0.05) this._vy = 0;
+        }
+      });
+
+      // Scoreboard component.  Maintains a running total of points and
+      // updates its text accordingly.  The scoreboard starts at 501 and
+      // decrements on each dart throw.  The global reference
+      // window.scoreKeeper is used by the dart component to add points.
+      AFRAME.registerComponent('scoreboard', {
+        init: function () {
+          this.score = 501;
+          // Expose this instance globally so darts can update the score
+          window.scoreKeeper = this;
+          this.updateDisplay();
+        },
+        updateDisplay: function () {
+          this.el.setAttribute('value', 'Score: ' + this.score);
+        },
+        addPoints: function (points) {
+          // Subtract points from the score (501 down)
+          this.score -= points;
+          if (this.score < 0) this.score = 0;
+          this.updateDisplay();
+        }
+      });
+
+      // Apply scoreboard component to the scoreboard text entity.
+      document.addEventListener('DOMContentLoaded', () => {
+        const sbEl = document.querySelector('#scoreboard');
+        if (sbEl) sbEl.setAttribute('scoreboard', '');
+      });
+
+      // Dart component.  Moves the dart forward based on its velocity and
+      // checks for intersection with the dartboard.  When a hit is detected,
+      // it computes the score based on radial distance and angle and then
+      // updates the scoreboard via the global scoreKeeper reference.  The
+      // dart removes itself from the scene after scoring.
+      AFRAME.registerComponent('dart', {
+        schema: {
+          velocity: { type: 'vec3' }
+        },
+        init: function () {
+          this.hit = false;
+        },
+        tick: function (t, dt) {
+          if (this.hit) return;
+          const pos = this.el.object3D.position;
+          pos.x += this.data.velocity.x * dt / 1000;
+          pos.y += this.data.velocity.y * dt / 1000;
+          pos.z += this.data.velocity.z * dt / 1000;
+          // Dartboard plane is at z = -5.  When we pass this plane, compute
+          // where we hit relative to the board centre (0,1.6).  The board
+          // radius is 0.5.
+          if (pos.z <= -4.99) {
+            this.hit = true;
+            const dx = pos.x - 0;
+            const dy = pos.y - 1.6;
+            const radius = Math.sqrt(dx * dx + dy * dy);
+            const angleDeg = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+            // Wedge values for a standard dartboard ordered clockwise starting
+            // at the right-hand 20 wedge (0 degrees).  Each sector spans 18°.
+            const baseScores = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17,
+                                 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+            let points = 0;
+            // Bullseye and outer bull radii thresholds.  Board radius is 0.5.
+            if (radius <= 0.05) {
+              points = 50; // Inner bullseye
+            } else if (radius <= 0.10) {
+              points = 25; // Outer bullseye
+            } else if (radius <= 0.5) {
+              const wedgeIndex = Math.floor(angleDeg / 18);
+              let base = baseScores[wedgeIndex];
+              // Triple ring: between 0.20 and 0.25
+              if (radius >= 0.20 && radius <= 0.25) {
+                points = base * 3;
+              }
+              // Double ring: between 0.35 and 0.40
+              else if (radius >= 0.35 && radius <= 0.40) {
+                points = base * 2;
+              }
+              // Single: anything else within radius
+              else {
+                points = base;
+              }
+            } else {
+              // Missed board entirely; 0 points
+              points = 0;
+            }
+            // Update scorekeeper if available
+            if (window.scoreKeeper) {
+              window.scoreKeeper.addPoints(points);
+            }
+            // Remove the dart entity from the scene
+            this.el.parentNode && this.el.parentNode.removeChild(this.el);
+          }
+        }
+      });
+
+      // Dart‑thrower component.  Listens for trigger presses on the right
+      // controller and spawns a dart entity travelling in the direction of
+      // the controller's forward vector.  The dart uses the dart component
+      // above to handle motion and scoring.  Velocity magnitude controls
+      // throw speed (units per second).
+      AFRAME.registerComponent('dart-thrower', {
+        init: function () {
+          this.el.addEventListener('triggerdown', () => {
+            this.throwDart();
+          });
+        },
+        throwDart: function () {
+          const handObj = this.el.object3D;
+          const sceneEl = this.el.sceneEl;
+          // Get world position for starting point
+          const start = new THREE.Vector3();
+          handObj.getWorldPosition(start);
+          // Compute forward direction (-Z in local space) in world coords
+          const dir = new THREE.Vector3(0, 0, -1);
+          const quat = new THREE.Quaternion();
+          handObj.getWorldQuaternion(quat);
+          dir.applyQuaternion(quat);
+          // Normalise direction just in case
+          dir.normalize();
+          // Create dart entity
+          const dart = document.createElement('a-cylinder');
+          dart.setAttribute('radius', 0.015);
+          dart.setAttribute('height', 0.25);
+          dart.setAttribute('color', '#ff0000');
+          dart.setAttribute('position', `${start.x} ${start.y} ${start.z}`);
+          // Assign a velocity proportional to direction
+          const speed = 8; // m/s approximate throw speed
+          dart.setAttribute('dart', { velocity: { x: dir.x * speed, y: dir.y * speed, z: dir.z * speed } });
+          // Add to scene
+          sceneEl.appendChild(dart);
+        }
+      });
+
+      // External VR button handler
+      document.getElementById('vrButton').addEventListener('click', () => {
+        const sceneEl = document.querySelector('a-scene');
+        if (sceneEl && sceneEl.enterVR) {
+          sceneEl.enterVR();
+        }
+      });
+    </script>
+  </body>
+</html>
