@@ -92,16 +92,14 @@
         "
       ></a-entity>
 
-      <!-- Floating text to welcome users -->
-      <a-entity
-        position="0 3 -5"
-        text="
-        value: Velkommen til bjerglandskab!\nBrug venstre tommepind til at g&aring; rundt.\nForlad omr&aring;det for at opdage mere.;
-          align: center;
-          width: 6;
-          color: #fff;
-        "
-      ></a-entity>
+        <!-- Floating text to welcome users -->
+        <!--
+          Use a single-line text attribute with an explicit font that supports
+          extended Latin characters (Danish å/ø/æ). The DejaVu MSDF font
+          includes these characters and is hosted on the A‑Frame CDN.
+        -->
+        <a-entity position="0 3 -5"
+                  text="value: Velkommen til bjerglandskab!\nBrug venstre tommepind til at gå rundt.\nForlad området for at opdage mere.; align: center; width: 6; color: #fff; font: https://cdn.aframe.io/fonts/DejaVu-sdf.fnt;"></a-entity>
 
       <!-- Simple campfire model using primitives; adds ambiance -->
       <a-entity id="campfire" position="2 0 -3">
